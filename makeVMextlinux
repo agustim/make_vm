@@ -1,0 +1,113 @@
+#!/bin/bash
+# Make a VM with extlinux like a boot system.
+# Using http://www.blackkettle.org/blog/2013/08/19/bootable-mountable-vm-images/
+
+set -e
+
+MOUNTPOINT=${1:-"mountpoint"}
+DEBIAN_VERSION=${2:-"wheezy"}
+DISC_IMG=${3:-"$DEBIAN_VERSION.img"}
+ARCH=${4:-686}
+DISC_SPACE=${5:-4G}
+LOG_FILE=${6:-mvmext.log}
+ROOT_PASSWORD=${ROOT_PASSWORD:-"foobar"}
+FS_CACHE=${DEBIAN_VERSION}_cache
+
+
+printlog()
+{
+	data=`/bin/date "+%Y.%m.%d.%H.%M.%S"`
+	echo "[${data}]:$1" >> ${LOG_FILE}
+}
+
+mount_proc_dev_sys ()
+{
+	if [ -z "${1:-}" ];
+	then
+    	printlog "ERROR: Didn't pass mount point in first parameter."
+    	exit -1
+	fi
+	printlog "Mount proc, dev/pts and sys."
+	sudo mount proc $1/proc -t proc
+	sudo mount /dev/pts $1/dev/pts -t devpts
+	sudo mount /sys $1/sys -t sysfs
+
+	printlog "Save resolv.conf to Image."
+	sudo cp /etc/resolv.conf $1/etc/resolv.conf
+}
+
+umount_proc_dev_sys ()
+{
+	if [ -z "${1:-}" ];
+	then
+    	printlog "ERROR: Didn't pass mount point in first parameter."
+    	exit -1
+	fi
+	printlog "Umount proc, dev/pts and sys."
+	sudo umount $1/proc
+	sudo umount $1/dev/pts
+	sudo umount $1/sys
+}
+
+fchroot()
+{
+	if [ -z "${1:-}" ];
+	then
+    	printlog "ERROR: Didn't pass mount point in first parameter."
+    	exit -1
+	fi
+	FS=$1
+	shift
+
+	# If fchroot only mount point, execute /bin/bash.
+	sudo chroot ${FS} "${@:-/bin/bash}"
+}
+
+# Start script
+printlog "Start script..."
+if [ ! -f "${FS_CACHE}.tar.bz" ]; then
+	printlog "Doesn't exist image from"
+	mkdir -p ${FS_CACHE}
+	sudo debootstrap ${DEBIAN_VERSION} ${FS_CACHE} http://ftp.debian.org/debian
+	sudo tar jcf "${FS_CACHE}.tar.bz" -C ${FS_CACHE} .
+fi
+
+
+truncate -s${DISC_SPACE} ${DISC_IMG}
+/sbin/mkfs.ext4 -F ${DISC_IMG}
+mkdir -p ${MOUNTPOINT}
+sudo mount -o loop ${DISC_IMG} ${MOUNTPOINT}
+sudo tar jxf "${FS_CACHE}.tar.bz" -C ${MOUNTPOINT}
+
+mount_proc_dev_sys ${MOUNTPOINT}
+
+fchroot ${MOUNTPOINT} apt-get update
+fchroot ${MOUNTPOINT} apt-get install -yy --force-yes \
+  linux-image-${ARCH} \
+  extlinux
+
+fchroot ${MOUNTPOINT} extlinux --install /boot
+
+KERNEL=$(cd ${MOUNTPOINT}/boot && ls vmlinuz* | tail -n1)
+INITRD=$(cd ${MOUNTPOINT}/boot && ls initrd* | tail -n1)
+sudo tee ${MOUNTPOINT}/boot/extlinux.conf > /dev/null <<EXTLINUXCONF
+default linux
+prompt 0
+timeout 0
+
+label linux
+kernel /boot/${KERNEL}
+append initrd=/boot/${INITRD} root=/dev/sda clocksource=kvm-clock
+EXTLINUXCONF
+
+sudo tee -a ${MOUNTPOINT}/etc/inittab > /dev/null <<ETCINITTAB
+T0:23:respawn:/sbin/getty -L ttyS0 115200 vt102
+ETCINITTAB
+
+dd if=${MOUNTPOINT}/usr/lib/extlinux/mbr.bin of=${DISC_IMG} conv=notrunc
+
+echo "root:${ROOT_PASSWORD}" | fchroot ${MOUNTPOINT} chpasswd
+
+umount_proc_dev_sys ${MOUNTPOINT}
+
+sudo umount ${MOUNTPOINT}

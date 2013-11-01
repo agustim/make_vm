@@ -1,0 +1,5 @@
+mountpoint
+*_cache
+*_cache.tar.bz
+*.img
+*.log
