@@ -75,3 +75,17 @@ remove_prevent_launch()
 {
 	sudo rm -f $1/usr/sbin/policy-rc.d
 }
+
+make_vdi()
+{
+	if [ -z "${1:-}" ] || [ -z "${2:-}" ];
+	then
+    	printlog "ERROR: Need two parameter, image_file name_vdi_file."
+    	exit -1
+	fi
+	if [ -f $2 ]
+	then
+		rm $2
+	fi
+	VBoxManage convertfromraw $1 $2
+}

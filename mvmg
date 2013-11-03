@@ -12,6 +12,7 @@ MNTPOINT=${6:-"mntpoint"}
 ROOT_PASSWORD=${ROOT_PASSWORD:-"root"}
 LOCATE_GEN=${LOCATE_GEN:-"ca_ES.UTF-8 UTF-8"}
 LOG_FILE=${LOG_FILE:-}
+VDI_IMAGE_FILE=${VDI_IMAGE_FILE:-}
 FS_CACHE=${DEBIAN_VERSION}_cache
 
 # Help
@@ -31,6 +32,7 @@ if [ -z $DISC_IMG ];
 	echo "	ROOT_PASSWORD: Can define root's password to the image, by default ${ROOT_PASSWORD}."
 	echo "	LOCATE_GEN: Can define LOCATE, by default ${LOCATE_GEN}."
 	echo "	LOG_FILE: Can define log file, by default stdout."
+	echo "	VDI_IMAGE_FILE: Create a image VDI (Need VBoxManager), by default doesn't create."
 	echo ""
 	exit
 fi
@@ -202,3 +204,10 @@ sudo losetup -d /dev/loop0
 # Remove mount directory
 printlog "Remove mount pointer."
 rmdir ${MNTPOINT}
+
+# If exist VDI_IMAGE_FILE create
+if [ -z $VDI_IMAGE_FILE ];
+then
+	printlog "Create VDI file."
+	make_vdi ${DISC_IMG} ${VDI_IMAGE_FILE}
+fi
