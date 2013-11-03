@@ -1,0 +1,45 @@
+#!/bin/bash
+
+install_gcodis_with_chroot()
+{
+
+if [ -z $1 ];
+then
+	printlog "Need Mount Pointer as the first parameter."
+	return -1
+fi
+LOCAL_MNTPOINT=$1
+
+printlog "Start gcodis..."
+printlog "Install tahoe, avahi-utils"
+fchroot ${LOCAL_MNTPOINT} apt-get -qq -yy --force-yes install tahoe-lafs avahi-utils
+printlog "Install avahi"
+fchroot ${LOCAL_MNTPOINT} apt-get -qq -yy --force-yes install avahi-daemon avahi-autoipd dbus-x11 geoip-bin avahi-utils
+printlog "Create user: 'gcodis'"
+fchroot ${LOCAL_MNTPOINT} useradd -m -s /bin/bash -d /home/gcodis gcodis
+printlog "Install Guifi's services."
+sudo su -c "echo 'deb http://serveis.guifi.net/debian guifi/' > ${LOCAL_MNTPOINT}/etc/apt/sources.list.d/guifi.net-stable.list"
+printlog "Install special keys."
+fchroot ${LOCAL_MNTPOINT} apt-key adv --keyserver pgp.mit.edu --recv-keys 2E484DAB
+fchroot ${LOCAL_MNTPOINT} apt-key adv --keyserver pgp.rediris.es --recv-keys 2E484DAB
+printlog "Update system."
+fchroot ${LOCAL_MNTPOINT} apt-get -qq update
+printlog "Install OpenVPN, inetutils vim nano."
+fchroot ${LOCAL_MNTPOINT} apt-get -qq -yy --force-yes install openvpn inetutils-ping vim nano
+printlog "Install Server OpenSSH"
+fchroot ${LOCAL_MNTPOINT} apt-get -qq -yy --force-yes install openssh-server
+printlog "Install anothers packages..."
+fchroot ${LOCAL_MNTPOINT} apt-get -qq -yy --force-yes install ifupdown libui-dialog-perl dialog \
+						isc-dhcp-client netbase net-tools iproute w3m links2
+printlog "Install pwgen, need to generate node tahoe."
+fchroot ${LOCAL_MNTPOINT} apt-get -qq install pwgen
+printlog "Create node."
+fchroot ${LOCAL_MNTPOINT} su gcodis -c 'tahoe create-node -i pb://cporo6rrozvkzu5ux6qkzdt5pqbynvkb@10.139.40.59:60730/introducer -n $(pwgen -1)'
+printlog "Create tun device."
+fchroot ${LOCAL_MNTPOINT} su -c '(ls /dev/net/tun &> /dev/null) || (mkdir -p /dev/net ; mknod /dev/net/tun c 10 200 )'
+printlog "Create rc.local..."
+sudo su -c "echo 'su gcodis -c \"tahoe start\"' > ${LOCAL_MNTPOINT}/etc/rc.local"
+sudo su -c "echo exit 0 >> ${LOCAL_MNTPOINT}/etc/rc.local"
+printlog "Insert TERM=linux in profile file."
+sudo su -c "echo export TERM=linux >> ${LOCAL_MNTPOINT}/etc/profile"
+}

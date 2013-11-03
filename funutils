@@ -1,0 +1,77 @@
+#!/bin/bash
+
+printlog()
+{
+	data=`/bin/date "+%Y.%m.%d.%H.%M.%S"`
+	if [ -z "${LOG_FILE}" ];
+	then
+		echo "[${data}]:$1"
+	else 
+		echo "[${data}]:$1" >> ${LOG_FILE}
+	fi
+}
+
+mount_proc_dev_sys ()
+{
+	if [ -z "${1:-}" ];
+	then
+    	printlog "ERROR: Didn't pass mount point in first parameter."
+    	exit -1
+	fi
+	printlog "Mount proc, dev/pts and sys."
+	sudo mount proc $1/proc -t proc
+	sudo mount /dev/pts $1/dev/pts -t devpts
+	sudo mount /sys $1/sys -t sysfs
+
+	printlog "Save resolv.conf to Image."
+	sudo cp /etc/resolv.conf $1/etc/resolv.conf
+}
+
+umount_proc_dev_sys ()
+{
+	if [ -z "${1:-}" ];
+	then
+    	printlog "ERROR: Didn't pass mount point in first parameter."
+    	exit -1
+	fi
+	printlog "Umount proc, dev/pts and sys."
+	sudo umount $1/proc
+	sudo umount $1/dev/pts
+	sudo umount $1/sys
+}
+
+fchroot()
+{
+	if [ -z "${1:-}" ];
+	then
+    	printlog "ERROR: Didn't pass mount point in first parameter."
+    	exit -1
+	fi
+	FS=$1
+	shift
+
+	# If fchroot only mount point, execute /bin/bash.
+	sudo chroot ${FS} "${@:-/bin/bash}"
+}
+
+prevent_launch()
+{
+	if [ -z "${1:-}" ];
+	then
+    	printlog "ERROR: Didn't pass mount point in first parameter."
+    	exit -1
+	fi
+	# Prevent launch of servers during apt-get install
+	sudo mkdir -p $1/usr/sbin/
+	sudo su -c "cat > $1/usr/sbin/policy-rc.d << EOF
+#!/bin/sh
+exit 101
+EOF
+"
+	sudo chmod 755 $1/usr/sbin/policy-rc.d
+}
+
+remove_prevent_launch()
+{
+	sudo rm -f $1/usr/sbin/policy-rc.d
+}

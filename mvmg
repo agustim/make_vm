@@ -1,0 +1,172 @@
+#!/bin/bash 
+
+set -e
+
+# Variables
+DISC_IMG=${1:-"wheezy.img"}
+IMAGE_GIGA_SIZE=${2:-"2"}
+MNTPOINT=${3:-"mntpoint"}
+DEBIAN_VERSION=${4:-"wheezy"}
+ARCH=${5:-"686"}
+HOSTNAME=${6:-"gcodis"}
+ROOT_PASSWORD=${ROOT_PASSWORD:-"root"}
+LOCATE_GEN=${LOCATE_GEN:-"ca_ES.UTF-8 UTF-8"}
+FS_CACHE=${DEBIAN_VERSION}_cache
+
+img_size=$((${IMAGE_GIGA_SIZE}*1024*1024*1024))
+# bytes per sector
+bytes=512
+# sectors per track
+sectors=63
+# heads per track
+heads=255
+# Mount point
+
+
+# bytes per cylinder is bytes*sectors*head
+bpc=$(( bytes*sectors*heads ))
+# number of cylinders
+cylinders=$(($img_size/$bpc))
+# rebound the size
+image_size=$(( ($cylinders+1)*$bpc ))
+# calcule mbr
+mbr_size=$(($sectors * $bytes))
+
+# Load functions utils.
+. ./funutils
+
+# Create file
+qemu-img create -f raw ${DISC_IMG} ${image_size}
+
+
+# Make MBR signature
+echo -e "\x55\xaa" | dd bs=1 count=2 seek=510 of=${DISC_IMG} conv=notrunc
+
+# Make partitions
+parted -s ${DISC_IMG} mkpart primary ext2 0 ${IMAGE_GIGA_SIZE}G
+sfdisk -D ${DISC_IMG} <<EOF
+,,L,*
+;
+;
+;
+EOF
+
+# Assing file to loop0
+printlog "Define /dev/loop0 to image file: ${DISC_IMG}"
+sudo losetup /dev/loop0 ${DISC_IMG}
+
+# Skip mbr_size to loop1
+printlog "Define /dev/loop1 offset ${mbr_size} reserve space to MBR."
+sudo losetup -o $mbr_size /dev/loop1 /dev/loop0
+
+# Format loop1
+printlog "Format partition with ext4."
+sudo mkfs.ext4 /dev/loop1
+
+# Prepare mount point
+printlog "Create point to install."
+sudo mkdir -p ${MNTPOINT}
+
+# Mount partition 
+printlog "Mount file format partition in mount point."
+sudo mount /dev/loop1 ${MNTPOINT}
+
+# Prepare rootfs
+# Exist cache file?
+if [ ! -f "${FS_CACHE}.tar.bz" ]; then
+	printlog "Doesn't exist cache file."
+	mkdir -p ${FS_CACHE}
+	sudo debootstrap ${DEBIAN_VERSION} ${FS_CACHE} http://ftp.debian.org/debian
+	sudo tar jcf "${FS_CACHE}.tar.bz" -C ${FS_CACHE} .
+fi
+# Install base system.
+printlog "Save minim rootfs."
+sudo tar jxf "${FS_CACHE}.tar.bz" -C ${MNTPOINT}
+
+# Prepar to chroot
+printlog "Prepare chroot."
+mount_proc_dev_sys ${MNTPOINT}
+
+# Deny execute daemon when apt-get install
+printlog "Prevent launch daemon from starting during apt-get install."
+prevent_launch ${MNTPOINT}
+
+# Update system
+printlog "Update system in the image file."
+fchroot ${MNTPOINT} apt-get -qq update
+
+# Define locate
+printlog "Save Locate: ${LOCATE_GEN}"
+sudo su -c "echo ${LOCATE_GEN} > ${MNTPOINT}/etc/locale.gen"
+
+printlog "Install locales."
+fchroot ${MNTPOINT} apt-get -qq -y --force-yes install locales
+printlog "Configure locale."
+fchroot ${MNTPOINT} locale-gen
+
+fchroot ${MNTPOINT} apt-get -qq -f -y --force-yes install
+printlog "Update"
+fchroot ${MNTPOINT} apt-get -qq -y --force-yes upgrade
+printlog "Install kernel and extlinux."
+fchroot ${MNTPOINT} apt-get install -qq -yy --force-yes \
+  linux-image-${ARCH} \
+  extlinux
+
+# Gcodis
+. ./fungcodis
+install_gcodis_with_chroot ${MNTPOINT}
+
+# Install grub
+# sudo grub-install --root-directory=${MNTPOINT} --no-floppy --modules 'part_msdos ext2' /dev/loop0
+# Grub doesn't work, yet.
+
+# Install extlinux
+printlog "Install extlinux."
+fchroot ${MNTPOINT} extlinux --install /boot
+
+# Calculed UUID from partition
+printlog "Calcule UUID, kenel, initrd." 
+eval `sudo blkid /dev/loop1|cut -d" " -f2`;
+KERNEL=$(cd ${MNTPOINT}/boot && ls vmlinuz* | tail -n1)
+INITRD=$(cd ${MNTPOINT}/boot && ls initrd* | tail -n1)
+
+printlog "UUID=${UUID} KERNEL=${KERNEL} INITRD=${INITRD}"
+
+sudo tee ${MNTPOINT}/boot/extlinux.conf > /dev/null <<EXTLINUXCONF
+default linux
+timeout 30
+
+label linux
+	kernel /boot/${KERNEL}
+	append initrd=/boot/${INITRD} root=UUID=${UUID} ro
+EXTLINUXCONF
+
+# Install MBR
+printlog "Install MBR."
+dd if=${MNTPOINT}/usr/lib/extlinux/mbr.bin of=${DISC_IMG} conv=notrunc
+
+# Create password
+echo "root:${ROOT_PASSWORD}" | fchroot ${MNTPOINT} chpasswd
+printlog "Assigned ${ROOT_PASSWORD} as the root's password."
+
+# Assign hostname.
+printlog "Assign ${HOSTNAME} to image."
+sudo su -c "echo ${HOSTNAME} > ${MNTPOINT}/etc/hostname"
+
+# Sync
+sync
+
+# remove prevent launch
+printlog "Remove prevent launch daemon."
+remove_prevent_launch ${MNTPOINT}
+
+# Umount 
+umount_proc_dev_sys ${MNTPOINT}
+
+# Umount file image.
+sudo umount ${MNTPOINT}
+
+# Delete loop devices.
+sudo losetup -d /dev/loop1
+sudo losetup -d /dev/loop0
+
