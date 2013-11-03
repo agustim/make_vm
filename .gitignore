@@ -3,3 +3,4 @@ mountpoint
 *_cache.tar.bz
 *.img
 *.log
+*.vdi
