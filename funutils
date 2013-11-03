@@ -2,7 +2,7 @@
 
 printlog()
 {
-	data=`/bin/date "+%Y.%m.%d.%H.%M.%S"`
+	data=`/bin/date "+%Y-%m-%d %H:%M:%S"`
 	if [ -z "${LOG_FILE}" ];
 	then
 		echo "[${data}]:$1"

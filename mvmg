@@ -3,15 +3,37 @@
 set -e
 
 # Variables
-DISC_IMG=${1:-"wheezy.img"}
+DISC_IMG=${1:-}
 IMAGE_GIGA_SIZE=${2:-"2"}
-MNTPOINT=${3:-"mntpoint"}
+HOSTNAME=${3:-"gcodis"}
 DEBIAN_VERSION=${4:-"wheezy"}
 ARCH=${5:-"686"}
-HOSTNAME=${6:-"gcodis"}
+MNTPOINT=${6:-"mntpoint"}
 ROOT_PASSWORD=${ROOT_PASSWORD:-"root"}
 LOCATE_GEN=${LOCATE_GEN:-"ca_ES.UTF-8 UTF-8"}
+LOG_FILE=${LOG_FILE:-}
 FS_CACHE=${DEBIAN_VERSION}_cache
+
+# Help
+
+if [ -z $DISC_IMG ];
+	then
+	echo "Use: $0 <Image Name> [Image Size in GB] [Hostname] [Debian version] [Arch] [Mount pointer]"
+	echo ""
+	echo "	Image Name: Name of the Image file."
+	echo "	Image size in GB: Defines how big the file, by default ${IMAGE_GIGA_SIZE}."
+	echo "	Hostname: Hostname to the image, by default '${HOSTNAME}'."
+	echo "	Debain version: Debian Version you want to use, by default '${DEBIAN_VERSION}'."
+	echo "	Arch: Architecture that uses image file, by default ${ARCH}."
+	echo "	Mount pointer: Temporal directory when mount image file, by default '${MNTPOINT}'."
+	echo ""
+	echo "Other hacks:"
+	echo "	ROOT_PASSWORD: Can define root's password to the image, by default ${ROOT_PASSWORD}."
+	echo "	LOCATE_GEN: Can define LOCATE, by default ${LOCATE_GEN}."
+	echo "	LOG_FILE: Can define log file, by default stdout."
+	echo ""
+	exit
+fi
 
 img_size=$((${IMAGE_GIGA_SIZE}*1024*1024*1024))
 # bytes per sector
@@ -35,14 +57,19 @@ mbr_size=$(($sectors * $bytes))
 # Load functions utils.
 . ./funutils
 
+printlog "Start script."
+
 # Create file
+printlog "Create image file."
 qemu-img create -f raw ${DISC_IMG} ${image_size}
 
 
 # Make MBR signature
+printlog "Write MBR signature."
 echo -e "\x55\xaa" | dd bs=1 count=2 seek=510 of=${DISC_IMG} conv=notrunc
 
 # Make partitions
+printlog "Make a partitions."
 parted -s ${DISC_IMG} mkpart primary ext2 0 ${IMAGE_GIGA_SIZE}G
 sfdisk -D ${DISC_IMG} <<EOF
 ,,L,*
@@ -74,7 +101,7 @@ sudo mount /dev/loop1 ${MNTPOINT}
 # Prepare rootfs
 # Exist cache file?
 if [ ! -f "${FS_CACHE}.tar.bz" ]; then
-	printlog "Doesn't exist cache file."
+	printlog "Doesn't exist cache file, create it."
 	mkdir -p ${FS_CACHE}
 	sudo debootstrap ${DEBIAN_VERSION} ${FS_CACHE} http://ftp.debian.org/debian
 	sudo tar jcf "${FS_CACHE}.tar.bz" -C ${FS_CACHE} .
@@ -164,9 +191,14 @@ remove_prevent_launch ${MNTPOINT}
 umount_proc_dev_sys ${MNTPOINT}
 
 # Umount file image.
+printlog "Umount image file."
 sudo umount ${MNTPOINT}
 
 # Delete loop devices.
+printlog "Desassigned loop's files."
 sudo losetup -d /dev/loop1
 sudo losetup -d /dev/loop0
 
+# Remove mount directory
+printlog "Remove mount pointer."
+rmdir ${MNTPOINT}
