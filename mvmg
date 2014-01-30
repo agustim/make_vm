@@ -7,7 +7,7 @@ DISC_IMG=${1:-}
 IMAGE_GIGA_SIZE=${2:-"2"}
 HOSTNAME=${3:-"gcodis"}
 DEBIAN_VERSION=${4:-"wheezy"}
-ARCH=${5:-"686"}
+ARCH=${5:-"amd64"}
 MNTPOINT=${6:-"mntpoint"}
 ROOT_PASSWORD=${ROOT_PASSWORD:-"root"}
 LOCATE_GEN=${LOCATE_GEN:-"ca_ES.UTF-8 UTF-8"}
@@ -72,8 +72,8 @@ echo -e "\x55\xaa" | dd bs=1 count=2 seek=510 of=${DISC_IMG} conv=notrunc
 
 # Make partitions
 printlog "Make a partitions."
-parted -s ${DISC_IMG} mkpart primary ext2 0 ${IMAGE_GIGA_SIZE}G
-sfdisk -D ${DISC_IMG} <<EOF
+/sbin/parted -s ${DISC_IMG} mkpart primary ext2 0 ${IMAGE_GIGA_SIZE}G
+/sbin/sfdisk -D ${DISC_IMG} <<EOF
 ,,L,*
 ;
 ;
@@ -142,8 +142,8 @@ fchroot ${MNTPOINT} apt-get install -qq -yy --force-yes \
   extlinux
 
 # Gcodis
-. ./fungcodis
-install_gcodis_with_chroot ${MNTPOINT}
+#. ./fungcodis
+#install_gcodis_with_chroot ${MNTPOINT}
 
 # Install grub
 # sudo grub-install --root-directory=${MNTPOINT} --no-floppy --modules 'part_msdos ext2' /dev/loop0
